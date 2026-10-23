@@ -1,0 +1,5 @@
+# Failure mode note
+
+The most important real bug I hit in Module 3 was a structured-output schema issue. I initially used a loose `args: dict` field for the action schema, which looked convenient but failed in strict structured-output mode because the provider requires each object field to be explicitly typed and rejects a bare dictionary with an HTTP 400 error. That was a genuine failure I observed while implementing the ReAct graph, and it is exactly the kind of issue the worksheet warns about: a catch-all dict is not a real schema.
+
+I fixed it by replacing the loose field with explicit `tool`, `expr`, and `text` fields, each with its own type and validation metadata, so the model had to produce a valid action object in a constrained shape. Once that was corrected, the agent could return proper `calculator` and `final_answer` actions without manual JSON parsing, and the graph began to execute normally. This was a useful lesson because it reinforced that structured output gives safety at the schema boundary: the model is still allowed to choose a wrong tool or wrong arithmetic, but it cannot return an invalid action structure.
