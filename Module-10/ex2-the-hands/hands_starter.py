@@ -110,7 +110,7 @@ def check_egress(reply: str) -> tuple[bool, str]:
 # never handed over cannot be abused. Every tool you expose is a permission
 # you granted, so grant the fewest you can and add the next one when something
 # actually breaks.
-EXPOSED_TOOLS = ("lookup_order", "issue_refund", "email_customer")  # <- edit this
+EXPOSED_TOOLS = ("lookup_order", "issue_refund")  # <- edit this
 
 client = setup_env.client()
 meter = Meter()
@@ -178,7 +178,55 @@ def check_call(name: str, args: dict) -> tuple[bool, str]:
     #
     #   e. anything else: refuse. Unknown tool, unknown rule -> no.
     #        return False, f"no validation rule for '{name}' -- refusing (fail closed)"
-    return True, ""  # <- replace all of this
+    if name not in EXPOSED_TOOLS:
+        return False, f"'{name}' is not a tool this desk holds (layer 1)"
+
+    if name == "lookup_order":
+        order_id = str(args.get("order_id", "")).strip()
+        if not re.fullmatch(r"\d{4}", order_id):
+            return False, f"order_id {args.get('order_id')!r} is not four digits"
+        if get_order(order_id) is None:
+            return False, f"order_id {order_id!r} has no record"
+        return True, ""
+
+    if name == "issue_refund":
+        order_id = str(args.get("order_id", "")).strip()
+        if not re.fullmatch(r"\d{4}", order_id):
+            return False, f"order_id {args.get('order_id')!r} is not four digits"
+
+        record = get_order(order_id)
+        if record is None:
+            return False, f"order_id {order_id!r} has no record"
+
+        amount_raw = args.get("amount")
+        try:
+            amount = float(amount_raw)
+        except (TypeError, ValueError):
+            return False, f"amount {amount_raw!r} is not a number"
+
+        max_amount = float(policy.TOOLS["issue_refund"]["max_amount"])
+        if amount > max_amount:
+            return False, f"amount {amount} exceeds the refund cap of {max_amount}"
+
+        if abs(amount - float(record["amount"])) > 0.005:
+            return False, f"amount {amount} does not match the recorded amount {record['amount']}"
+
+        return True, ""
+
+    if name == "email_customer":
+        address = args.get("address", "")
+        body = args.get("body", "")
+        if not isinstance(address, str) or not address.strip():
+            return False, f"address {address!r} is not a string"
+        if not isinstance(body, str):
+            return False, f"body {body!r} is not a string"
+
+        domain = address.rsplit("@", 1)[-1].lower() if "@" in address else ""
+        if domain not in policy.TOOLS["email_customer"]["allowed_domains"]:
+            return False, f"address {address!r} is not on the allow-list"
+        return True, ""
+
+    return False, f"no validation rule for '{name}' -- refusing (fail closed)"
 
 
 # ── LAYER 3 · the approval gate ──────────────────────────────────────────────
@@ -214,7 +262,27 @@ def ask_human(name: str, args: dict, mode: str) -> bool:
     #      Default to NO. "[y/N]" with N capitalised, and only the exact
     #      string "y" approves -- so a stray Enter denies. A gate whose
     #      default is yes is a speed bump.
-    return True  # <- replace this line
+    if not policy.needs_approval(name):
+        return True
+
+    detail = ", ".join(f"{k}={v!r}" for k, v in args.items())
+    if mode == "deny":
+        print(f"  APPROVAL REQUIRED: {name}({detail})")
+        return False
+
+    if mode == "rubber-stamp":
+        print(f"  APPROVED BY DEFAULT: {name}({detail})")
+        return True
+
+    if mode == "live":
+        print(f"  APPROVAL REQUIRED: {name}({detail})")
+        print(f"  risk: {policy.TOOLS[name]['risk']}")
+        print(f"  why: {policy.TOOLS[name]['why']}")
+        answer = input("approve? [y/N] ")
+        return answer.strip() == "y"
+
+    print(f"  APPROVED BY DEFAULT: {name}({detail})")
+    return True
 
 
 # ── the tools themselves ─────────────────────────────────────────────────────
