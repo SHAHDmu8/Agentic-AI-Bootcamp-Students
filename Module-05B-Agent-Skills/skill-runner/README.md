@@ -10,7 +10,7 @@ lines, no framework, and it prints its receipts every run.
 
 ```powershell
 cd Module-05B-Agent-Skills\skill-runner
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py --list
+..\..\.venv\Scripts\python.exe skill_runner.py --list
 ```
 
 ```
@@ -26,7 +26,7 @@ cd Module-05B-Agent-Skills\skill-runner
 Now fire one:
 
 ```powershell
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py "Give me a one-page brief on agentic RAG for a CTO audience"
+..\..\.venv\Scripts\python.exe skill_runner.py "Give me a one-page brief on agentic RAG for a CTO audience"
 ```
 
 Real output from this machine:
@@ -50,7 +50,7 @@ PROGRESSIVE DISCLOSURE — what it actually cost
 Now prove the other half — that a skill **stays out of the way**:
 
 ```powershell
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py "What is 12 x 9?"
+..\..\.venv\Scripts\python.exe skill_runner.py "What is 12 x 9?"
 ```
 
 ```
@@ -190,7 +190,7 @@ That last one is the closing section of the module.
 ## Part 3 — the closing idea: skills that run agents
 
 ```powershell
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py "Grade the submission in resources/sample-submission.md against the rubric"
+..\..\.venv\Scripts\python.exe skill_runner.py "Grade the submission in resources/sample-submission.md against the rubric"
 ```
 
 Watch the trace:

@@ -15,13 +15,13 @@ package **judgement** the same way — and watch a skill start other agents.
 Same environment as Module 5. **Python 3.12.**
 
 ```powershell
-Module-02\.venv\Scripts\python.exe --version      # expect 3.12.x
+.venv\Scripts\python.exe --version      # expect 3.12.x
 ```
 
 ### 2. Install
 
 ```powershell
-Module-02\.venv\Scripts\python.exe -m pip install -r Module-05B-Agent-Skills\requirements.txt
+.venv\Scripts\python.exe -m pip install -r Module-05B-Agent-Skills\requirements.txt
 ```
 
 Only two packages, and you already have both from Module 1.
@@ -36,7 +36,7 @@ If this prints three skills, you are ready:
 
 ```powershell
 cd Module-05B-Agent-Skills\skill-runner
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py --list
+..\..\.venv\Scripts\python.exe skill_runner.py --list
 ```
 
 ---

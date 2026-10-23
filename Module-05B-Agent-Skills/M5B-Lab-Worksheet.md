@@ -23,13 +23,13 @@
 ## Setup gate (5 min)
 
 ```powershell
-Module-02\.venv\Scripts\python.exe -m pip install -r Module-05B-Agent-Skills\requirements.txt
+.venv\Scripts\python.exe -m pip install -r Module-05B-Agent-Skills\requirements.txt
 cd Module-05B-Agent-Skills\skill-runner
-..\..\Module-02\.venv\Scripts\python.exe skill_runner.py --list
+..\..\.venv\Scripts\python.exe skill_runner.py --list
 ```
 
 ✅ Three skills listed → you're ready.
-❌ `ModuleNotFoundError` → wrong interpreter. Use `Module-02\.venv`.
+❌ `ModuleNotFoundError` → wrong interpreter. Use the repo-root `.venv`.
 
 If a later step returns `404 ... 0 endpoints ... ZDR violation`, your model
 can't take tools on your account:

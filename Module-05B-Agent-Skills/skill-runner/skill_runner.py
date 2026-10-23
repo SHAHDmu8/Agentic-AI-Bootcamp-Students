@@ -56,6 +56,9 @@ load_dotenv(HERE.parent / ".env")
 load_dotenv(HERE / ".env")
 
 MODEL = os.getenv("SKILL_MODEL", "openai/gpt-4.1-mini")
+ROUTER_MAX_TOKENS = int(os.getenv("SKILL_ROUTER_MAX_TOKENS", "512"))
+MAIN_RESPONSE_MAX_TOKENS = int(os.getenv("SKILL_RESPONSE_MAX_TOKENS", "2048"))
+SUBAGENT_MAX_TOKENS = int(os.getenv("SKILL_SUBAGENT_MAX_TOKENS", "1024"))
 client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
@@ -266,6 +269,7 @@ class Toolbox:
         reply = client.chat.completions.create(
             model=MODEL,
             temperature=0,
+            max_tokens=SUBAGENT_MAX_TOKENS,
             messages=[
                 {"role": "system", "content": role},
                 {"role": "user", "content": task},
@@ -306,6 +310,7 @@ def route(skills: list[Skill], user_request: str) -> tuple[str | None, str]:
     reply = client.chat.completions.create(
         model=MODEL,
         temperature=0,
+        max_tokens=ROUTER_MAX_TOKENS,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user_request},
@@ -356,7 +361,7 @@ def run(user_request: str, use_skills: bool = True, verbose: bool = True) -> str
         # Build kwargs conditionally. Passing `tools=None` is NOT the same as
         # omitting it — the SDK serialises it as "tools": null, which some
         # OpenRouter providers stall on. Omit the key entirely instead.
-        kwargs = {"model": MODEL, "temperature": 0, "messages": messages}
+        kwargs = {"model": MODEL, "temperature": 0, "messages": messages, "max_tokens": MAIN_RESPONSE_MAX_TOKENS}
         if chosen:
             kwargs["tools"] = TOOL_SPECS
         try:
