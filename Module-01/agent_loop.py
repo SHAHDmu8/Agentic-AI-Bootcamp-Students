@@ -7,8 +7,24 @@ from pathlib import Path
 from openai import OpenAI
 
 MAX_STEPS = 6
+MAX_LLM_CALLS = 8
 MODEL = "openai/gpt-4o-mini"
 BASE_URL = "https://openrouter.ai/api/v1"
+
+COUNTRY_CAPITALS = {
+    "france": "Paris",
+    "germany": "Berlin",
+    "italy": "Rome",
+    "spain": "Madrid",
+    "united kingdom": "London",
+    "uk": "London",
+    "canada": "Ottawa",
+    "japan": "Tokyo",
+    "india": "New Delhi",
+    "egypt": "Cairo",
+    "morocco": "Rabat",
+    "tunisia": "Tunis",
+}
 
 
 def _load_root_env() -> None:
@@ -32,14 +48,16 @@ _load_root_env()
 
 SYSTEM_PROMPT = """\
 You are an autonomous agent solving a problem step by step.
-You CANNOT do arithmetic yourself; you must use the `calculator` tool.
-Use the calculator tool for any arithmetic needed.
-Use the observation history to decide the next step. If a number or intermediate result is already known, build on it instead of repeating the same calculation.
-Do not repeat the same calculator expression twice.
-When you produce a final_answer, include the full result in a sentence such as: "537, yes, more than 500."
+You must choose exactly one action on each step.
+Use the `calculator` tool for arithmetic only.
+Use the `lookup` tool for country-to-capital facts only.
+Use the `final_answer` tool only when the user question is fully answered.
+Do not repeat the same tool action and arguments twice in a row.
+If a value is already known, reuse it instead of repeating the same step.
 You must return ONLY valid JSON, with no prose and no markdown code fences.
 Use exactly one of these shapes:
 {"action": "calculator", "args": {"expr": "<expression>"}}
+{"action": "lookup", "args": {"country": "<country>"}}
 {"action": "final_answer", "args": {"text": "<answer>"}}
 """
 
@@ -105,6 +123,21 @@ def calculator(expr: str) -> str:
     return str(result)
 
 
+def lookup(country: str) -> str:
+    """Return the capital for a supported country. Raise a helpful error for unknown values."""
+    if not isinstance(country, str):
+        raise ValueError("Country must be a string.")
+
+    cleaned = country.strip()
+    if not cleaned:
+        raise ValueError("Country is empty.")
+
+    capital = COUNTRY_CAPITALS.get(cleaned.lower())
+    if capital is None:
+        raise ValueError(f"Unsupported country: {country}")
+    return capital
+
+
 def call_model(messages: list) -> str:
     """Send messages to the LLM and return the raw text content of the reply."""
     return call_model_with_usage(messages)["content"]
@@ -154,41 +187,79 @@ def run_agent(question: str) -> str:
     ]
     llm_calls = 0
     total_tokens = 0
-    last_action = None
+    last_tool_signature = None
 
     for step in range(1, MAX_STEPS + 1):
+        if llm_calls >= MAX_LLM_CALLS:
+            print(f"[stopped] llm call budget exhausted. llm_calls={llm_calls} total_tokens={total_tokens}")
+            return "No final answer (budget exhausted)."
+
         response = call_model_with_usage(messages)
         llm_calls += 1
         total_tokens += response["usage"].get("total_tokens", 0)
 
         raw_action = response["content"]
-        action = parse_action(raw_action)
+        try:
+            action = parse_action(raw_action)
+        except (ValueError, json.JSONDecodeError, TypeError):
+            if llm_calls >= MAX_LLM_CALLS:
+                print(f"[stopped] llm call budget exhausted. llm_calls={llm_calls} total_tokens={total_tokens}")
+                return "No final answer (budget exhausted)."
+
+            retry_prompt = (
+                "Your previous response was not valid JSON. "
+                "Return ONLY valid JSON in one of these exact shapes: "
+                '{"action": "calculator", "args": {"expr": "<expression>"}}; '
+                '{"action": "lookup", "args": {"country": "<country>"}}; '
+                '{"action": "final_answer", "args": {"text": "<answer>"}}'
+            )
+            messages.append({"role": "user", "content": retry_prompt})
+            response = call_model_with_usage(messages)
+            llm_calls += 1
+            total_tokens += response["usage"].get("total_tokens", 0)
+            raw_action = response["content"]
+            try:
+                action = parse_action(raw_action)
+            except (ValueError, json.JSONDecodeError, TypeError) as exc:
+                raise ValueError("Model failed to return valid JSON even after one retry.") from exc
+
         action_name = action.get("action")
+        args = action.get("args", {}) or {}
 
         if action_name == "final_answer":
-            final_text = str(action.get("args", {}).get("text", ""))
+            final_text = str(args.get("text", ""))
             print(f"[step {step}] final_answer: {final_text}")
             print(f"[summary] steps={step} llm_calls={llm_calls} total_tokens={total_tokens}")
             return final_text
 
+        if action_name not in {"calculator", "lookup"}:
+            raise ValueError(f"Unsupported action: {action_name!r}")
+
+        tool_signature = (action_name, json.dumps(args, sort_keys=True))
+        if last_tool_signature == tool_signature:
+            print(f"[stopped] repeated tool action: {action_name} {args}")
+            print(f"[summary] steps={step - 1} llm_calls={llm_calls} total_tokens={total_tokens}")
+            return "No final answer (repeated action)."
+
         if action_name == "calculator":
-            expr = str(action.get("args", {}).get("expr", ""))
-            if last_action == expr:
-                print(f"[stopped] repeated calculator action: {expr}")
-                print(f"[summary] steps={step - 1} llm_calls={llm_calls} total_tokens={total_tokens}")
-                return "No final answer (repeated action)."
+            expr = str(args.get("expr", ""))
             result = calculator(expr)
             print(f"[step {step}] calculator: {expr} = {result}")
             messages.append({"role": "user", "content": f"Observation: {result}"})
-            last_action = expr
-            continue
+        elif action_name == "lookup":
+            country = str(args.get("country", ""))
+            result = lookup(country)
+            print(f"[step {step}] lookup: {country} = {result}")
+            messages.append({"role": "user", "content": f"Observation: {result}"})
 
-        raise ValueError(f"Unsupported action: {action_name!r}")
+        last_tool_signature = tool_signature
+        continue
 
     print(f"[stopped] step budget exhausted. steps={MAX_STEPS} llm_calls={llm_calls} total_tokens={total_tokens}")
     return "No final answer (budget exhausted)."
 
 
 if __name__ == "__main__":
-    q = "What is (23 * 19) + 100, and is that more than 500?"
-    print(run_agent(q))
+    if os.environ.get("OPENROUTER_API_KEY"):
+        q = "What is the capital of France, and what is 12 * 12?"
+        print(run_agent(q))
