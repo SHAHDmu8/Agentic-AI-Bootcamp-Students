@@ -183,7 +183,69 @@ def gleif_lookup(legal_name: str) -> str:
     Run  python verify_tools.py  to check yourself.
     ---------------------------------------------------------------------------
     """
-    # TODO: implement. Delete the line below when you do.
-    raise NotImplementedError(
-        "gleif_lookup is yours to write - see the docstring, then run verify_tools.py"
-    )
+    if not isinstance(legal_name, str):
+        legal_name = ""
+
+    query = legal_name.strip()
+    if not query:
+        return NO_RECORDS
+
+    params = {"filter[entity.legalName]": query}
+    url = "https://api.gleif.org/api/v1/lei-records?" + urllib.parse.urlencode(params)
+
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/vnd.api+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return LOOKUP_UNAVAILABLE
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list) or not data:
+        return NO_RECORDS
+
+    def normalise_name(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        lower = text.lower()
+        lower = lower.replace("&", " and ")
+        lower = re.sub(r"[^a-z0-9 ]+", " ", lower)
+        return " ".join(lower.split())
+
+    normalized_input = normalise_name(query)
+    exact_count = 0
+    lines = [f"GLEIF search results for '{legal_name}':"]
+
+    for index, item in enumerate(data, start=1):
+        attrs = item.get("attributes", {}) if isinstance(item, dict) else {}
+        entity = attrs.get("entity") if isinstance(attrs, dict) else {}
+        registration = attrs.get("registration") if isinstance(attrs, dict) else {}
+
+        legal_obj = entity.get("legalName") if isinstance(entity, dict) else ""
+        legal = legal_obj.get("name") if isinstance(legal_obj, dict) else (legal_obj or "")
+        lei = attrs.get("lei") if isinstance(attrs, dict) else ""
+        if not lei:
+            lei = item.get("id") if isinstance(item, dict) else ""
+
+        address = entity.get("legalAddress") if isinstance(entity, dict) else {}
+        country = address.get("country") if isinstance(address, dict) else ""
+        entity_status = str(entity.get("status") or "UNKNOWN").upper()
+        reg_status = str(registration.get("status") or "UNKNOWN").upper()
+
+        match_label = "exact" if normalise_name(str(legal)) == normalized_input else "not exact"
+        if match_label == "exact":
+            exact_count += 1
+
+        lines.append(
+            f"{index}. {legal or 'Unknown legal name'} | "
+            f"LEI: {lei or 'n/a'} | country: {country or 'n/a'} | "
+            f"entity status: {entity_status} | registration status: {reg_status} | match: {match_label}"
+        )
+
+    lines.append(f"exact matches: {exact_count} of {len(data)}")
+    if exact_count == 0:
+        lines.append("0 exactly")
+    else:
+        lines.append(f"{exact_count} exactly")
+    return "\n".join(lines)
