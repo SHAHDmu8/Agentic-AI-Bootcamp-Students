@@ -178,7 +178,11 @@ def pick_model(text: str) -> str:
     # Then read the before/after table. If success dropped, you routed too
     # aggressively -- raise the bar. If nothing dropped and the bill halved,
     # you just learned that the expensive model was a habit, not a requirement.
-    return setup_env.STRONG_MODEL  # <- replace this line
+    low = text.lower()
+    many_orders = len(order_ids(text)) > 1
+    if many_orders or len(text) > 500 or any(word in low for word in HARD_WORDS):
+        return setup_env.STRONG_MODEL
+    return setup_env.CHEAP_MODEL  # <- replace this line
 
 
 # ── TODO 2 · caching ─────────────────────────────────────────────────────────
@@ -209,7 +213,14 @@ def cache_get(key: str) -> str | None:
     # cleaned message. Leave the model out and a routing change starts serving
     # answers from the other model. Leave anything out and you are caching a
     # question you did not actually ask.
-    return None  # <- replace this line
+    hit = CACHE.get(key)
+    if hit is None:
+        return None
+    reply, stored_at = hit
+    if time.time() - stored_at > CACHE_TTL_SECONDS:
+        del CACHE[key]
+        return None
+    return reply
 
 
 def cache_put(key: str, reply: str) -> None:
@@ -240,6 +251,7 @@ def handle(case: Case, *, force_model: str | None = None, use_cache: bool = Fals
     # Record the prompt now. If this case fails, the scorecard prints it.
     capture(system=SYSTEM_PROMPT, user=cleaned)
     refused, gated, reply = [], [], ""
+    action_taken = False
 
     for _ in range(policy.MAX_TOOL_STEPS):
         # ===== TODO 3 -- the spend budget ===================================
@@ -256,6 +268,11 @@ def handle(case: Case, *, force_model: str | None = None, use_cache: bool = Fals
         # the case did not pass, it ran out of money. Then try
         #     python meter_starter.py --budget 0.002
         # and watch the run stop instead of quietly costing 400x.
+        if meter.dollars() >= RUN_BUDGET_USD:
+            raise BudgetExceeded(
+                f"this run has spent ${meter.dollars():.5f}, at or over the "
+                f"${RUN_BUDGET_USD:.5f} ceiling"
+            )
         started = time.perf_counter()
         completion = client.chat.completions.create(
             model=model, temperature=0, max_tokens=500,
@@ -291,6 +308,7 @@ def handle(case: Case, *, force_model: str | None = None, use_cache: bool = Fals
                 result = ("This action is not permitted. Do not retry it and do not state "
                           "amounts or limits. Say a colleague will follow up.")
             else:
+                action_taken = True
                 if policy.needs_approval(name):
                     gated.append(name)
                     capture(step="   -> gated, and approved")
@@ -306,7 +324,7 @@ def handle(case: Case, *, force_model: str | None = None, use_cache: bool = Fals
     if not clean:
         ledger.append(f"output blocked: {why_egress}")
         return "REFUSE", "Sorry -- I could not complete that. A colleague will follow up."
-    if use_cache and not refused and not gated:
+    if use_cache and not refused and not gated and not action_taken:
         cache_put(cache_key, reply)   # never cache a money-moving turn
     if refused:
         return "REFUSE", reply or "(policy refusal)"
